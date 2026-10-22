@@ -1,0 +1,1495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Merger — Sequential Upload Attacher</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .drop-active {
+      border-color: #4f46e5 !important;
+      background-color: #eef2ff !important;
+      transform: scale(1.005);
+    }
+    .drag-over-row {
+      border-top: 3px solid #4f46e5 !important;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    @media print {
+      body > *:not(#printContainer) {
+        display: none !important;
+      }
+      #printContainer {
+        display: block !important;
+        width: 100% !important;
+      }
+      .print-page-img {
+        page-break-after: always;
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
+
+  <!-- Print-to-PDF fallback container (only visible when printing) -->
+  <div id="printContainer" class="hidden"></div>
+
+  <!-- Top Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shadow-indigo-200">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold tracking-tight text-slate-900">PDF Sequential Attacher</h1>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              100% Browser Private
+            </span>
+          </div>
+          <p class="text-xs text-slate-500">Files are automatically queued and attached in the exact order you upload them</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="loadDemoBtn" type="button" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+          </svg>
+          Load 3 Sample PDFs
+        </button>
+        <button id="headerAddFilesBtn" type="button" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          Upload PDFs
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Toast Banner -->
+  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+  <!-- Main Workspace -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Left / Center Column: Upload Zone & Ordered Queue (8 cols) -->
+    <div class="lg:col-span-7 flex flex-col gap-5">
+
+      <!-- Hidden File Input -->
+      <input id="pdfFileInput" type="file" accept=".pdf,application/pdf" multiple class="hidden" />
+
+      <!-- Drag & Drop Upload Box -->
+      <div id="dropZone" class="bg-white border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-2xl p-6 sm:p-7 text-center transition-all cursor-pointer group shadow-sm">
+        <div class="max-w-md mx-auto flex flex-col items-center">
+          <div class="w-12 h-12 rounded-2xl bg-indigo-50 group-hover:bg-indigo-100 text-indigo-600 flex items-center justify-center mb-3 transition-colors">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+          </div>
+          <h2 class="text-base font-semibold text-slate-900">
+            Drop PDF files here or <span class="text-indigo-600 underline decoration-indigo-300 underline-offset-4">browse computer</span>
+          </h2>
+          <p class="text-xs text-slate-500 mt-1">
+            Upload files one by one or in batches. Each new PDF is appended to the end of your attachment sequence (<span class="font-medium text-slate-700">#1 → #2 → #3</span>).
+          </p>
+        </div>
+      </div>
+
+      <!-- Visual Sequence Flow Bar (Visible when files > 0) -->
+      <div id="sequenceFlowCard" class="hidden bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <div class="flex items-center justify-between gap-2 mb-2.5">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Attachment Blueprint</span>
+            <span id="orderStatusBadge" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+              In Exact Upload Order
+            </span>
+          </div>
+          <span id="totalBlueprintPages" class="text-xs font-semibold text-slate-700">0 Total Pages</span>
+        </div>
+        <div id="sequenceFlowStrip" class="flex items-center gap-1.5 overflow-x-auto pb-1"></div>
+      </div>
+
+      <!-- Queue Toolbar & List -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+        <div class="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50/60">
+          <div class="flex items-center gap-2.5">
+            <h3 class="text-sm font-semibold text-slate-800">Uploaded PDF Queue</h3>
+            <span id="queueCountBadge" class="px-2 py-0.5 text-xs font-semibold rounded-full bg-slate-200 text-slate-700">0 files</span>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button id="restoreUploadOrderBtn" type="button" class="hidden items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors" title="Sort back to exact upload sequence">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Restore Upload Order
+            </button>
+            <button id="reverseOrderBtn" type="button" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 transition-colors disabled:opacity-40 disabled:pointer-events-none" disabled>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+              </svg>
+              Reverse
+            </button>
+            <button id="clearQueueBtn" type="button" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors disabled:opacity-40 disabled:pointer-events-none" disabled>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Clear All
+            </button>
+          </div>
+        </div>
+
+        <!-- Empty Queue State -->
+        <div id="emptyQueueState" class="p-10 text-center">
+          <div class="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <p class="text-sm font-medium text-slate-700">No PDF files uploaded yet</p>
+          <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+            Upload 2 or more PDF files above, or click <span class="font-medium text-indigo-600">"Load 3 Sample PDFs"</span> in the top bar to test attaching files right away.
+          </p>
+        </div>
+
+        <!-- Queue Items Container -->
+        <ul id="queueList" class="divide-y divide-slate-200 hidden"></ul>
+      </div>
+    </div>
+
+    <!-- Right Column: Merge Controls, Settings & Result Preview (5 cols) -->
+    <div class="lg:col-span-5 flex flex-col gap-5">
+
+      <!-- Merge Action & Settings Card -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col gap-4">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div>
+            <h3 class="text-sm font-bold text-slate-900">Step 2: Attach &amp; Export PDF</h3>
+            <p class="text-xs text-slate-500">Combine uploaded files in sequence</p>
+          </div>
+          <span class="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+            </svg>
+          </span>
+        </div>
+
+        <!-- Output Filename -->
+        <div>
+          <label for="outputFilenameInput" class="block text-xs font-semibold text-slate-700 mb-1">
+            Merged File Name
+          </label>
+          <div class="relative flex items-center">
+            <input id="outputFilenameInput" type="text" value="attached-pdfs" placeholder="attached-pdfs" class="w-full rounded-lg border border-slate-300 pl-3 pr-12 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+            <span class="absolute right-3 text-xs font-medium text-slate-400 select-none">.pdf</span>
+          </div>
+        </div>
+
+        <!-- Options Toggles -->
+        <div class="space-y-2 pt-0.5">
+          <label class="flex items-start gap-2.5 cursor-pointer select-none">
+            <input id="lockUploadOrderToggle" type="checkbox" checked class="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <span class="block text-xs font-semibold text-slate-800">Lock strict upload order</span>
+              <span class="block text-[11px] text-slate-500">Always attach files in exact chronological upload sequence (#1, #2, #3...)</span>
+            </div>
+          </label>
+
+          <label class="flex items-start gap-2.5 cursor-pointer select-none">
+            <input id="stampPageNumbersToggle" type="checkbox" class="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <span class="block text-xs font-semibold text-slate-800">Add continuous page numbers</span>
+              <span class="block text-[11px] text-slate-500">Stamps "Page X of Y" neatly in the bottom footer across all attached files</span>
+            </div>
+          </label>
+
+          <label class="flex items-start gap-2.5 cursor-pointer select-none">
+            <input id="insertDividerPageToggle" type="checkbox" class="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <span class="block text-xs font-semibold text-slate-800">Insert section cover sheets</span>
+              <span class="block text-[11px] text-slate-500">Adds a clean separator page before each attached PDF showing its filename &amp; upload order</span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Summary Metrics Box -->
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-200/80 grid grid-cols-3 gap-2 text-center">
+          <div>
+            <span class="block text-[11px] text-slate-500">Files</span>
+            <span id="summaryFilesCount" class="text-sm font-bold text-slate-900">0</span>
+          </div>
+          <div class="border-x border-slate-200">
+            <span class="block text-[11px] text-slate-500">Output Pages</span>
+            <span id="summaryPagesCount" class="text-sm font-bold text-indigo-600">0</span>
+          </div>
+          <div>
+            <span class="block text-[11px] text-slate-500">Est. Size</span>
+            <span id="summaryTotalSize" class="text-sm font-bold text-slate-900">0 KB</span>
+          </div>
+        </div>
+
+        <!-- Primary Merge Button -->
+        <button id="mergePdfsBtn" type="button" disabled class="w-full py-3 px-4 rounded-xl font-semibold text-sm text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 shadow-md shadow-indigo-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none disabled:pointer-events-none">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+          </svg>
+          <span id="mergeBtnText">Attach PDFs Together</span>
+        </button>
+      </div>
+
+      <!-- Merged Result Card (Appears once merged) -->
+      <div id="mergedResultCard" class="hidden bg-emerald-50/70 rounded-2xl border border-emerald-200 p-5 shadow-sm flex flex-col gap-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div>
+              <h4 class="text-sm font-bold text-emerald-950">Merged PDF Ready!</h4>
+              <p id="mergedResultMeta" class="text-xs text-emerald-700">0 pages • 0 KB</p>
+            </div>
+          </div>
+          <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800">Ready</span>
+        </div>
+
+        <!-- Sandbox Notice & Multi-Save Controls -->
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 leading-relaxed">
+          <strong>Running inside Chat Preview?</strong> If the chat preview sandbox blocks direct downloads, click <strong>Print / Save as PDF</strong> (choose <em>"Save as PDF"</em> as the printer) or use the <strong>Download icon</strong> inside the embedded PDF viewer below!
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <!-- Method 1: Primary Blob Download Anchor -->
+          <a id="downloadMergedLink" data-native-download="true" href="data:application/pdf;base64," download="attached-pdfs.pdf" class="w-full py-2.5 px-4 rounded-xl font-semibold text-xs sm:text-sm text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 shadow-sm flex items-center justify-center gap-2 transition-colors text-center cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download Attached PDF
+          </a>
+
+          <!-- Method 2: Print / Save as PDF (Works even when iframe blocks <a download>) -->
+          <button id="printSavePdfBtn" type="button" class="w-full py-2.5 px-4 rounded-xl font-semibold text-xs sm:text-sm text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm flex items-center justify-center gap-2 transition-colors cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Print / Save as PDF (Works in Chat!)
+          </button>
+
+          <div class="grid grid-cols-2 gap-2">
+            <button id="inspectMergedBtn" type="button" class="w-full py-2 px-2.5 rounded-xl font-medium text-xs text-emerald-900 bg-white hover:bg-emerald-100/60 border border-emerald-300 flex items-center justify-center gap-1.5 transition-colors">
+              <svg class="w-3.5 h-3.5 text-emerald-700 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              <span>Preview All Attached Pages</span>
+            </button>
+
+            <button id="saveAsDialogBtn" type="button" class="w-full py-2 px-2.5 rounded-xl font-medium text-xs text-indigo-900 bg-white hover:bg-indigo-50 border border-indigo-200 flex items-center justify-center gap-1.5 transition-colors" title="Save using system file picker or open in new tab">
+              <svg class="w-3.5 h-3.5 text-indigo-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+              </svg>
+              <span>Save As / Alt Download</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Inline Embedded Browser PDF Viewer (Has native Download & Print buttons in top-right toolbar) -->
+        <div class="flex flex-col gap-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-emerald-900">Built-In PDF Viewer (Use toolbar to Save)</span>
+          </div>
+          <iframe id="inlinePdfViewerFrame" title="Merged PDF Viewer" class="w-full h-72 rounded-xl border border-emerald-300 bg-white shadow-inner"></iframe>
+        </div>
+
+        <!-- Attached Order Verification Receipt -->
+        <div class="bg-white/90 rounded-xl p-3 border border-emerald-200/80">
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Attachment Order Log</div>
+          <ol id="mergedReceiptList" class="space-y-1.5 text-xs text-slate-700 max-h-40 overflow-y-auto pr-1"></ol>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Page Inspector / Preview Modal -->
+  <div id="previewModal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
+      <div class="px-5 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50">
+        <div>
+          <h3 id="previewModalTitle" class="text-sm font-bold text-slate-900">Document Page Preview</h3>
+          <p id="previewModalSubtitle" class="text-xs text-slate-500">Visual verification of pages</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="modalDownloadBtn" type="button" class="hidden items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download PDF
+          </button>
+          <button id="closePreviewModalBtn" type="button" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors" aria-label="Close modal">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="previewModalGrid" class="p-5 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 bg-slate-100/70 flex-1"></div>
+      <div class="px-5 py-3 border-t border-slate-200 bg-white flex items-center justify-between">
+        <span id="previewModalStatus" class="text-xs text-slate-500">Rendered using client-side PDF engine</span>
+        <button id="closePreviewFooterBtn" type="button" class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-colors">
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Configure PDF.js worker if loaded
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+
+    // Color palette for visual sequence chips
+    const FILE_COLORS = [
+      { bg: 'bg-indigo-600', light: 'bg-indigo-50', text: 'text-indigo-700', border: 'border-indigo-200' },
+      { bg: 'bg-sky-600', light: 'bg-sky-50', text: 'text-sky-700', border: 'border-sky-200' },
+      { bg: 'bg-emerald-600', light: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
+      { bg: 'bg-amber-600', light: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
+      { bg: 'bg-rose-600', light: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200' },
+      { bg: 'bg-purple-600', light: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' },
+      { bg: 'bg-teal-600', light: 'bg-teal-50', text: 'text-teal-700', border: 'border-teal-200' }
+    ];
+
+    // Application State
+    const state = {
+      files: [],          // Array of { id, name, size, rawBytes, pageCount, rangeStr, selectedIndices, uploadIndex, uploadedAt, thumbDataUrl }
+      nextUploadCounter: 1,
+      lockUploadOrder: true,
+      mergedPdfBytes: null,
+      mergedBlobUrl: null,
+      mergedDataUri: null,
+      draggedItemId: null
+    };
+
+    // DOM Elements
+    const printContainer = document.getElementById('printContainer');
+    const pdfFileInput = document.getElementById('pdfFileInput');
+    const dropZone = document.getElementById('dropZone');
+    const headerAddFilesBtn = document.getElementById('headerAddFilesBtn');
+    const loadDemoBtn = document.getElementById('loadDemoBtn');
+    const queueList = document.getElementById('queueList');
+    const emptyQueueState = document.getElementById('emptyQueueState');
+    const queueCountBadge = document.getElementById('queueCountBadge');
+    const restoreUploadOrderBtn = document.getElementById('restoreUploadOrderBtn');
+    const reverseOrderBtn = document.getElementById('reverseOrderBtn');
+    const clearQueueBtn = document.getElementById('clearQueueBtn');
+    const sequenceFlowCard = document.getElementById('sequenceFlowCard');
+    const sequenceFlowStrip = document.getElementById('sequenceFlowStrip');
+    const orderStatusBadge = document.getElementById('orderStatusBadge');
+    const totalBlueprintPages = document.getElementById('totalBlueprintPages');
+    const outputFilenameInput = document.getElementById('outputFilenameInput');
+    const lockUploadOrderToggle = document.getElementById('lockUploadOrderToggle');
+    const stampPageNumbersToggle = document.getElementById('stampPageNumbersToggle');
+    const insertDividerPageToggle = document.getElementById('insertDividerPageToggle');
+    const summaryFilesCount = document.getElementById('summaryFilesCount');
+    const summaryPagesCount = document.getElementById('summaryPagesCount');
+    const summaryTotalSize = document.getElementById('summaryTotalSize');
+    const mergePdfsBtn = document.getElementById('mergePdfsBtn');
+    const mergeBtnText = document.getElementById('mergeBtnText');
+    const mergedResultCard = document.getElementById('mergedResultCard');
+    const mergedResultMeta = document.getElementById('mergedResultMeta');
+    const downloadMergedLink = document.getElementById('downloadMergedLink');
+    const printSavePdfBtn = document.getElementById('printSavePdfBtn');
+    const inspectMergedBtn = document.getElementById('inspectMergedBtn');
+    const saveAsDialogBtn = document.getElementById('saveAsDialogBtn');
+    const inlinePdfViewerFrame = document.getElementById('inlinePdfViewerFrame');
+    const mergedReceiptList = document.getElementById('mergedReceiptList');
+    const toastContainer = document.getElementById('toastContainer');
+    const previewModal = document.getElementById('previewModal');
+    const previewModalTitle = document.getElementById('previewModalTitle');
+    const previewModalSubtitle = document.getElementById('previewModalSubtitle');
+    const previewModalGrid = document.getElementById('previewModalGrid');
+    const previewModalStatus = document.getElementById('previewModalStatus');
+    const modalDownloadBtn = document.getElementById('modalDownloadBtn');
+    const closePreviewModalBtn = document.getElementById('closePreviewModalBtn');
+    const closePreviewFooterBtn = document.getElementById('closePreviewFooterBtn');
+
+    // Utility: Format bytes
+    function formatBytes(bytes) {
+      if (!bytes || bytes === 0) return '0 KB';
+      const k = 1024;
+      if (bytes < k) return bytes + ' B';
+      const kb = bytes / k;
+      if (kb < 1024) return kb.toFixed(1) + ' KB';
+      return (kb / 1024).toFixed(2) + ' MB';
+    }
+
+    // Utility: Format ordinal (1st, 2nd, 3rd...)
+    function formatOrdinal(n) {
+      const s = ['th', 'st', 'nd', 'rd'];
+      const v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    }
+
+    // Utility: Sanitize text for WinAnsi StandardFonts in pdf-lib
+    function toWinAnsiSafe(str) {
+      return String(str || '')
+        .replace(/[\u202F\u00A0]/g, ' ')
+        .replace(/•/g, '-')
+        .replace(/[^\x20-\x7E]/g, '');
+    }
+
+    // Utility: Fast chunked Uint8Array to Base64 conversion
+    function uint8ArrayToBase64(bytes) {
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const sub = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, sub);
+      }
+      return btoa(binary);
+    }
+
+    // Utility: Get normalized output filename
+    function getNormalizedFilename() {
+      const raw = (outputFilenameInput.value || 'attached-pdfs').trim().replace(/\.pdf$/i, '');
+      return (raw || 'attached-pdfs') + '.pdf';
+    }
+
+    // Primary URL selector: prefer standard Blob URL first (works for all file sizes), with Data URI fallback
+    function getBestDownloadUrl() {
+      if (state.mergedBlobUrl) {
+        return state.mergedBlobUrl;
+      }
+      if (state.mergedPdfBytes) {
+        const blob = new Blob([state.mergedPdfBytes], { type: 'application/pdf' });
+        state.mergedBlobUrl = URL.createObjectURL(blob);
+        return state.mergedBlobUrl;
+      }
+      if (state.mergedDataUri) {
+        return state.mergedDataUri;
+      }
+      return '';
+    }
+
+    // Capture-phase shield on window:
+    // Prevents any host iframe document/window link-navigation blocker from calling e.preventDefault()
+    // when a download anchor with data-native-download="true" is clicked!
+    window.addEventListener('click', function(e) {
+      const anchor = e.target && e.target.closest ? e.target.closest('a[data-native-download="true"]') : null;
+      if (!anchor) return;
+
+      if (!state.mergedPdfBytes || state.mergedPdfBytes.length === 0) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        showToast('Please attach your PDFs first before downloading.', 'warning');
+        return;
+      }
+
+      const filename = getNormalizedFilename();
+      const targetUrl = getBestDownloadUrl();
+      anchor.href = targetUrl;
+      anchor.download = filename;
+
+      // Stop propagation immediately so host document/window listeners never call preventDefault()
+      e.stopImmediatePropagation();
+
+      if (e.defaultPrevented) {
+        const detached = document.createElement('a');
+        detached.href = targetUrl;
+        detached.download = filename;
+        detached.rel = 'noopener';
+        detached.click();
+      }
+
+      showToast(`Triggered download for "${filename}". Check your browser Downloads (Ctrl+J) or use "Print / Save as PDF" below if blocked by chat preview.`, 'success');
+    }, true);
+
+    // Programmatic download helper
+    function triggerProgrammaticDownload(useDataUri = false) {
+      if (!state.mergedPdfBytes || state.mergedPdfBytes.length === 0) {
+        showToast('Please attach your PDFs first before downloading.', 'warning');
+        return;
+      }
+
+      const filename = getNormalizedFilename();
+      const targetUrl = (useDataUri && state.mergedDataUri) ? state.mergedDataUri : getBestDownloadUrl();
+
+      let wasPrevented = false;
+      const tempAnchor = document.createElement('a');
+      tempAnchor.href = targetUrl;
+      tempAnchor.download = filename;
+      tempAnchor.rel = 'noopener';
+      tempAnchor.setAttribute('data-native-download', 'true');
+      tempAnchor.style.position = 'fixed';
+      tempAnchor.style.left = '-9999px';
+
+      tempAnchor.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (ev.defaultPrevented) wasPrevented = true;
+      });
+
+      document.body.appendChild(tempAnchor);
+      tempAnchor.click();
+
+      setTimeout(() => {
+        if (tempAnchor.parentNode) tempAnchor.parentNode.removeChild(tempAnchor);
+      }, 2000);
+
+      if (wasPrevented) {
+        const detached = document.createElement('a');
+        detached.href = targetUrl;
+        detached.download = filename;
+        detached.rel = 'noopener';
+        detached.click();
+      }
+    }
+
+    // Print / Save as PDF fallback — renders all merged pages at high resolution and invokes browser's native Save as PDF print dialog!
+    async function triggerPrintSaveAsPdf() {
+      if (!state.mergedPdfBytes) return;
+      printSavePdfBtn.disabled = true;
+      const origText = printSavePdfBtn.innerHTML;
+      printSavePdfBtn.textContent = 'Preparing pages for Save as PDF...';
+
+      try {
+        if (window.pdfjsLib) {
+          const bytesCopy = state.mergedPdfBytes.slice();
+          const pdfDoc = await window.pdfjsLib.getDocument({ data: bytesCopy }).promise;
+          printContainer.innerHTML = '';
+
+          for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+            const page = await pdfDoc.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 2.0 });
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+            const img = document.createElement('img');
+            img.src = canvas.toDataURL('image/png');
+            img.className = 'print-page-img';
+            printContainer.appendChild(img);
+          }
+
+          showToast('Select "Save as PDF" in the Destination dropdown to save your file!', 'info');
+          setTimeout(() => {
+            window.print();
+          }, 150);
+        } else if (inlinePdfViewerFrame && inlinePdfViewerFrame.contentWindow) {
+          inlinePdfViewerFrame.contentWindow.focus();
+          inlinePdfViewerFrame.contentWindow.print();
+        } else {
+          window.print();
+        }
+      } catch (err) {
+        showToast('Could not prepare print view: ' + (err && err.message ? err.message : 'Error'), 'error');
+      } finally {
+        printSavePdfBtn.disabled = false;
+        printSavePdfBtn.innerHTML = origText;
+      }
+    }
+
+    // Save As File Picker or Open in New Tab
+    async function handleSaveAsOrAltDownload() {
+      if (!state.mergedPdfBytes) return;
+      const filename = getNormalizedFilename();
+
+      if (typeof window.showSaveFilePicker === 'function') {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: filename,
+            types: [{
+              description: 'PDF Document',
+              accept: { 'application/pdf': ['.pdf'] }
+            }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(state.mergedPdfBytes);
+          await writable.close();
+          showToast(`Saved "${filename}" successfully!`, 'success');
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
+      }
+
+      // Try opening the Blob URL in a new browser tab (where native browser PDF viewer has full download access)
+      const blobUrl = getBestDownloadUrl();
+      const win = window.open(blobUrl, '_blank', 'noopener');
+      if (!win) {
+        // Fallback to Data URI stream download
+        triggerProgrammaticDownload(true);
+      } else {
+        showToast('Opened merged PDF in a new tab — use the top-right Download icon there to save!', 'info');
+      }
+    }
+
+    // Utility: Show non-blocking toast notification
+    function showToast(message, type = 'info') {
+      const toast = document.createElement('div');
+      const colors = {
+        info: 'bg-slate-900 text-white border-slate-700',
+        success: 'bg-emerald-700 text-white border-emerald-600',
+        warning: 'bg-amber-600 text-white border-amber-500',
+        error: 'bg-rose-600 text-white border-rose-500'
+      };
+      toast.className = `pointer-events-auto flex items-center justify-between gap-3 px-4 py-3 rounded-xl shadow-lg border text-xs font-medium transition-all duration-200 ${colors[type] || colors.info}`;
+      toast.innerHTML = `
+        <span>${escapeHtml(message)}</span>
+        <button type="button" class="opacity-75 hover:opacity-100 font-bold ml-2">✕</button>
+      `;
+      toast.querySelector('button').addEventListener('click', () => toast.remove());
+      toastContainer.appendChild(toast);
+      setTimeout(() => {
+        if (toast.parentNode) toast.remove();
+      }, 5000);
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // Parse page range string (e.g., "1-3, 5") into 0-based page indices
+    function parsePageRange(rangeStr, maxPages) {
+      const trimmed = (rangeStr || '').trim();
+      if (!trimmed || trimmed.toLowerCase() === 'all') {
+        return Array.from({ length: maxPages }, (_, i) => i);
+      }
+      const indices = [];
+      const parts = trimmed.split(',');
+      for (const part of parts) {
+        const p = part.trim();
+        if (!p) continue;
+        if (p.includes('-')) {
+          const [startRaw, endRaw] = p.split('-').map(s => parseInt(s.trim(), 10));
+          if (!isNaN(startRaw) && !isNaN(endRaw)) {
+            const start = Math.max(1, Math.min(maxPages, startRaw));
+            const end = Math.max(1, Math.min(maxPages, endRaw));
+            const step = start <= end ? 1 : -1;
+            for (let i = start; step > 0 ? i <= end : i >= end; i += step) {
+              indices.push(i - 1);
+            }
+          }
+        } else {
+          const num = parseInt(p, 10);
+          if (!isNaN(num) && num >= 1 && num <= maxPages) {
+            indices.push(num - 1);
+          }
+        }
+      }
+      return indices.length > 0 ? indices : Array.from({ length: maxPages }, (_, i) => i);
+    }
+
+    // Check if current list matches exact chronological upload order
+    function isStrictlyInUploadOrder() {
+      for (let i = 1; i < state.files.length; i++) {
+        if (state.files[i].uploadIndex < state.files[i - 1].uploadIndex) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // Render thumbnail for Page 1 of a PDF Uint8Array
+    async function generateFirstPageThumbnail(rawBytes) {
+      if (!window.pdfjsLib) return null;
+      try {
+        const copyData = rawBytes.slice();
+        const loadingTask = window.pdfjsLib.getDocument({ data: copyData });
+        const pdfDoc = await loadingTask.promise;
+        const page = await pdfDoc.getPage(1);
+        const viewport = page.getViewport({ scale: 0.35 });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        return canvas.toDataURL('image/png');
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // Process uploaded File objects strictly in the order received
+    async function handleIncomingFiles(fileList) {
+      const filesArray = Array.from(fileList || []);
+      if (filesArray.length === 0) return;
+
+      let addedCount = 0;
+      for (let i = 0; i < filesArray.length; i++) {
+        const file = filesArray[i];
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        if (!isPdf) {
+          showToast(`Skipped "${file.name}" (not a PDF file)`, 'warning');
+          continue;
+        }
+
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const rawBytes = new Uint8Array(arrayBuffer);
+          const pdfDoc = await window.PDFLib.PDFDocument.load(rawBytes.slice(), { ignoreEncryption: true });
+          const pageCount = pdfDoc.getPageCount();
+          const uploadIndex = state.nextUploadCounter++;
+          const now = new Date();
+          const uploadedAt = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const thumbDataUrl = await generateFirstPageThumbnail(rawBytes);
+
+          state.files.push({
+            id: 'pdf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+            name: file.name,
+            size: file.size,
+            rawBytes,
+            pageCount,
+            rangeStr: '',
+            selectedIndices: Array.from({ length: pageCount }, (_, idx) => idx),
+            uploadIndex,
+            uploadedAt,
+            thumbDataUrl
+          });
+          addedCount++;
+        } catch (err) {
+          showToast(`Could not read "${file.name}". Ensure it is a valid PDF.`, 'error');
+        }
+      }
+
+      if (addedCount > 0) {
+        if (state.lockUploadOrder) {
+          state.files.sort((a, b) => a.uploadIndex - b.uploadIndex);
+        }
+        invalidateMergedOutput();
+        renderAll();
+        showToast(
+          `Added ${addedCount} PDF${addedCount > 1 ? 's' : ''} in upload order (#${state.nextUploadCounter - addedCount} to #${state.nextUploadCounter - 1})`,
+          'success'
+        );
+      }
+    }
+
+    function invalidateMergedOutput() {
+      state.mergedPdfBytes = null;
+      state.mergedDataUri = null;
+      if (state.mergedBlobUrl) {
+        URL.revokeObjectURL(state.mergedBlobUrl);
+        state.mergedBlobUrl = null;
+      }
+      if (inlinePdfViewerFrame) {
+        inlinePdfViewerFrame.removeAttribute('src');
+      }
+      mergedResultCard.classList.add('hidden');
+    }
+
+    // Main UI Render Function
+    function renderAll() {
+      const count = state.files.length;
+      const inUploadOrder = isStrictlyInUploadOrder();
+      const dividerEnabled = insertDividerPageToggle.checked;
+
+      queueCountBadge.textContent = `${count} ${count === 1 ? 'file' : 'files'}`;
+      reverseOrderBtn.disabled = count < 2 || state.lockUploadOrder;
+      clearQueueBtn.disabled = count === 0;
+      mergePdfsBtn.disabled = count === 0;
+
+      // Show or hide Restore Upload Order button
+      if (count > 1 && !inUploadOrder) {
+        restoreUploadOrderBtn.classList.remove('hidden');
+        restoreUploadOrderBtn.classList.add('inline-flex');
+        orderStatusBadge.textContent = 'Custom Order (Modified)';
+        orderStatusBadge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200';
+      } else {
+        restoreUploadOrderBtn.classList.add('hidden');
+        restoreUploadOrderBtn.classList.remove('inline-flex');
+        orderStatusBadge.textContent = state.lockUploadOrder
+          ? 'Locked to Upload Order (#1 → #' + count + ')'
+          : 'In Exact Upload Order';
+        orderStatusBadge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700';
+      }
+
+      if (count === 0) {
+        emptyQueueState.classList.remove('hidden');
+        queueList.classList.add('hidden');
+        sequenceFlowCard.classList.add('hidden');
+        summaryFilesCount.textContent = '0';
+        summaryPagesCount.textContent = '0';
+        summaryTotalSize.textContent = '0 KB';
+        mergeBtnText.textContent = 'Attach PDFs Together';
+        return;
+      }
+
+      emptyQueueState.classList.add('hidden');
+      queueList.classList.remove('hidden');
+      sequenceFlowCard.classList.remove('hidden');
+
+      // Calculate running page ranges and render Blueprint Strip + Queue List
+      let runningPageCursor = 1;
+      let totalSize = 0;
+      sequenceFlowStrip.innerHTML = '';
+      queueList.innerHTML = '';
+
+      state.files.forEach((item, index) => {
+        const color = FILE_COLORS[item.uploadIndex % FILE_COLORS.length];
+        const pagesIncluded = item.selectedIndices.length;
+        const extraDivider = dividerEnabled ? 1 : 0;
+        const startPage = runningPageCursor;
+        const endPage = runningPageCursor + pagesIncluded + extraDivider - 1;
+        runningPageCursor = endPage + 1;
+        totalSize += item.size;
+
+        // 1. Add chip to Sequence Flow Strip
+        const chip = document.createElement('div');
+        chip.className = 'flex items-center gap-1.5 shrink-0';
+        chip.innerHTML = `
+          <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${color.light} ${color.border}">
+            <span class="w-5 h-5 rounded-md ${color.bg} text-white text-[11px] font-bold flex items-center justify-center">
+              #${item.uploadIndex}
+            </span>
+            <div class="text-left">
+              <div class="text-xs font-semibold text-slate-800 max-w-[130px] truncate" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
+              <div class="text-[10px] ${color.text} font-medium">Pages ${startPage}–${endPage}</div>
+            </div>
+          </div>
+          ${index < state.files.length - 1 ? `
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+          ` : ''}
+        `;
+        sequenceFlowStrip.appendChild(chip);
+
+        // 2. Add row to Queue List
+        const li = document.createElement('li');
+        li.className = 'p-4 hover:bg-slate-50/80 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4';
+        li.dataset.id = item.id;
+        if (!state.lockUploadOrder) {
+          li.draggable = true;
+        }
+
+        const thumbHtml = item.thumbDataUrl
+          ? `<img src="${item.thumbDataUrl}" alt="Page 1 of ${escapeHtml(item.name)}" class="w-12 h-16 object-cover rounded border border-slate-200 shadow-2xs bg-white shrink-0" />`
+          : `<div class="w-12 h-16 rounded border border-slate-200 bg-slate-100 flex flex-col items-center justify-center text-slate-400 shrink-0">
+               <span class="text-[10px] font-bold">PDF</span>
+             </div>`;
+
+        li.innerHTML = `
+          <div class="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+            <div class="flex flex-col items-center shrink-0">
+              <span class="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide text-white ${color.bg}">
+                ${formatOrdinal(index + 1)}
+              </span>
+              <span class="text-[10px] font-semibold text-slate-400 mt-1" title="Uploaded at ${escapeHtml(item.uploadedAt)}">
+                Upload #${item.uploadIndex}
+              </span>
+            </div>
+
+            ${thumbHtml}
+
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <p class="text-sm font-semibold text-slate-900 truncate" title="${escapeHtml(item.name)}">
+                  ${escapeHtml(item.name)}
+                </p>
+              </div>
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-0.5">
+                <span>${item.pageCount} ${item.pageCount === 1 ? 'page' : 'pages'}</span>
+                <span>•</span>
+                <span>${formatBytes(item.size)}</span>
+                <span>•</span>
+                <span class="font-medium text-indigo-600">Output p. ${startPage}–${endPage}</span>
+              </div>
+
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <label class="text-[11px] font-medium text-slate-600">Pages to attach:</label>
+                <input
+                  type="text"
+                  data-action="range"
+                  data-id="${item.id}"
+                  value="${escapeHtml(item.rangeStr)}"
+                  placeholder="All (1–${item.pageCount}) or e.g. 1-2"
+                  class="w-40 px-2 py-1 text-xs rounded border border-slate-200 focus:outline-none focus:border-indigo-500 bg-white text-slate-800"
+                />
+                <span class="text-[11px] text-slate-400">(${pagesIncluded} selected)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-1 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+            <button type="button" data-action="preview" data-id="${item.id}" class="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors" title="Preview pages in this file">
+              Preview
+            </button>
+            <button type="button" data-action="up" data-id="${item.id}" ${index === 0 || state.lockUploadOrder ? 'disabled' : ''} class="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none transition-colors" title="${state.lockUploadOrder ? 'Uncheck Lock strict upload order to reorder' : 'Move up'}">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" />
+              </svg>
+            </button>
+            <button type="button" data-action="down" data-id="${item.id}" ${index === state.files.length - 1 || state.lockUploadOrder ? 'disabled' : ''} class="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none transition-colors" title="${state.lockUploadOrder ? 'Uncheck Lock strict upload order to reorder' : 'Move down'}">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <button type="button" data-action="remove" data-id="${item.id}" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors" title="Remove file">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        `;
+
+        // Drag and Drop events for row reordering when unlocked
+        li.addEventListener('dragstart', (e) => {
+          if (state.lockUploadOrder) {
+            e.preventDefault();
+            return;
+          }
+          state.draggedItemId = item.id;
+          li.classList.add('opacity-50');
+        });
+        li.addEventListener('dragend', () => {
+          state.draggedItemId = null;
+          li.classList.remove('opacity-50');
+          document.querySelectorAll('#queueList li').forEach(el => el.classList.remove('drag-over-row'));
+        });
+        li.addEventListener('dragover', (e) => {
+          if (state.lockUploadOrder || !state.draggedItemId || state.draggedItemId === item.id) return;
+          e.preventDefault();
+          li.classList.add('drag-over-row');
+        });
+        li.addEventListener('dragleave', () => {
+          li.classList.remove('drag-over-row');
+        });
+        li.addEventListener('drop', (e) => {
+          e.preventDefault();
+          li.classList.remove('drag-over-row');
+          if (state.lockUploadOrder || !state.draggedItemId || state.draggedItemId === item.id) return;
+          const fromIdx = state.files.findIndex(f => f.id === state.draggedItemId);
+          const toIdx = state.files.findIndex(f => f.id === item.id);
+          if (fromIdx !== -1 && toIdx !== -1) {
+            const [moved] = state.files.splice(fromIdx, 1);
+            state.files.splice(toIdx, 0, moved);
+            invalidateMergedOutput();
+            renderAll();
+          }
+        });
+
+        queueList.appendChild(li);
+      });
+
+      const totalPages = runningPageCursor - 1;
+      totalBlueprintPages.textContent = `${totalPages} Total ${totalPages === 1 ? 'Page' : 'Pages'}`;
+      summaryFilesCount.textContent = String(count);
+      summaryPagesCount.textContent = String(totalPages);
+      summaryTotalSize.textContent = formatBytes(totalSize);
+      mergeBtnText.textContent = `Attach ${count} ${count === 1 ? 'PDF' : 'PDFs'} Together (${totalPages} p.)`;
+    }
+
+    // Core PDF Merging Function using pdf-lib
+    async function attachAllPdfs() {
+      if (state.files.length === 0) return;
+
+      // Enforce upload order if lock is enabled
+      if (state.lockUploadOrder) {
+        state.files.sort((a, b) => a.uploadIndex - b.uploadIndex);
+      }
+
+      mergePdfsBtn.disabled = true;
+      mergeBtnText.textContent = 'Attaching PDFs in order...';
+
+      try {
+        const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+        const mergedPdf = await PDFDocument.create();
+        const fontBold = await mergedPdf.embedFont(StandardFonts.HelveticaBold);
+        const fontRegular = await mergedPdf.embedFont(StandardFonts.Helvetica);
+
+        const addDividers = insertDividerPageToggle.checked;
+        const addPageNums = stampPageNumbersToggle.checked;
+        const receiptEntries = [];
+        let pageCursor = 1;
+
+        for (let i = 0; i < state.files.length; i++) {
+          const item = state.files[i];
+          const srcDoc = await PDFDocument.load(item.rawBytes.slice(), { ignoreEncryption: true });
+          const startPage = pageCursor;
+
+          // Optional Section Divider Cover Page
+          if (addDividers) {
+            const dividerPage = mergedPdf.addPage([595.28, 841.89]); // A4
+            const { width, height } = dividerPage.getSize();
+            dividerPage.drawRectangle({
+              x: 45,
+              y: height - 260,
+              width: width - 90,
+              height: 170,
+              color: rgb(0.95, 0.96, 0.99),
+              borderColor: rgb(0.78, 0.81, 0.95),
+              borderWidth: 1.5
+            });
+            dividerPage.drawText(toWinAnsiSafe(`ATTACHMENT #${i + 1} (UPLOAD #${item.uploadIndex})`), {
+              x: 70,
+              y: height - 140,
+              size: 12,
+              font: fontBold,
+              color: rgb(0.31, 0.27, 0.9)
+            });
+            dividerPage.drawText(toWinAnsiSafe(item.name || `Document_${i + 1}.pdf`), {
+              x: 70,
+              y: height - 175,
+              size: 18,
+              font: fontBold,
+              color: rgb(0.08, 0.1, 0.16)
+            });
+            dividerPage.drawText(
+              toWinAnsiSafe(`Uploaded at ${item.uploadedAt}  |  ${item.selectedIndices.length} page(s) attached`),
+              {
+                x: 70,
+                y: height - 205,
+                size: 11,
+                font: fontRegular,
+                color: rgb(0.38, 0.43, 0.52)
+              }
+            );
+            pageCursor++;
+          }
+
+          // Copy selected pages in exact order
+          const copiedPages = await mergedPdf.copyPages(srcDoc, item.selectedIndices);
+          for (const page of copiedPages) {
+            mergedPdf.addPage(page);
+            pageCursor++;
+          }
+
+          const endPage = pageCursor - 1;
+          receiptEntries.push({
+            seq: i + 1,
+            uploadIndex: item.uploadIndex,
+            name: item.name,
+            pageCount: item.selectedIndices.length,
+            startPage,
+            endPage
+          });
+        }
+
+        // Optional continuous page number footer stamp
+        const totalMergedPages = mergedPdf.getPageCount();
+        if (addPageNums && totalMergedPages > 0) {
+          const pages = mergedPdf.getPages();
+          pages.forEach((p, idx) => {
+            const { width } = p.getSize();
+            const label = `Page ${idx + 1} of ${totalMergedPages}`;
+            const textWidth = fontRegular.widthOfTextAtSize(label, 9);
+            p.drawText(label, {
+              x: (width - textWidth) / 2,
+              y: 18,
+              size: 9,
+              font: fontRegular,
+              color: rgb(0.4, 0.45, 0.52)
+            });
+          });
+        }
+
+        const finalFilename = getNormalizedFilename();
+        mergedPdf.setTitle(toWinAnsiSafe(finalFilename));
+        mergedPdf.setProducer('PDF Sequential Attacher');
+
+        const pdfBytes = await mergedPdf.save();
+        state.mergedPdfBytes = pdfBytes;
+
+        if (state.mergedBlobUrl) {
+          URL.revokeObjectURL(state.mergedBlobUrl);
+        }
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        state.mergedBlobUrl = URL.createObjectURL(blob);
+
+        if (pdfBytes.byteLength < 1500000) {
+          state.mergedDataUri = 'data:application/pdf;base64,' + uint8ArrayToBase64(pdfBytes);
+        } else {
+          state.mergedDataUri = null;
+        }
+
+        // Populate Result Card & update anchor attributes immediately
+        downloadMergedLink.href = state.mergedBlobUrl;
+        downloadMergedLink.download = finalFilename;
+        mergedResultMeta.textContent = `${totalMergedPages} total pages • ${formatBytes(pdfBytes.byteLength)} • ${finalFilename}`;
+
+        // Populate Inline Native PDF Viewer (has native Download & Print buttons in top-right toolbar)
+        inlinePdfViewerFrame.src = state.mergedDataUri || state.mergedBlobUrl;
+
+        mergedReceiptList.innerHTML = receiptEntries.map(entry => `
+          <li class="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">
+            <span class="truncate">
+              <strong class="text-indigo-700">#${entry.seq}</strong>
+              <span class="text-slate-400 text-[11px]">(Upload #${entry.uploadIndex})</span>
+              ${escapeHtml(entry.name)}
+            </span>
+            <span class="shrink-0 font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+              p. ${entry.startPage}–${entry.endPage}
+            </span>
+          </li>
+        `).join('');
+
+        mergedResultCard.classList.remove('hidden');
+        showToast(`Attached ${state.files.length} PDFs (${totalMergedPages} pages)! Click "Download Attached PDF" or "Print / Save as PDF".`, 'success');
+      } catch (err) {
+        showToast('Failed to merge PDFs: ' + (err && err.message ? err.message : 'Unknown error'), 'error');
+      } finally {
+        renderAll();
+      }
+    }
+
+    // Modal Page Inspector (renders pages of an individual or merged PDF)
+    async function openPageInspector(title, subtitle, rawBytes, isMergedOutput = false) {
+      previewModalTitle.textContent = title;
+      previewModalSubtitle.textContent = subtitle;
+      if (isMergedOutput && state.mergedPdfBytes) {
+        modalDownloadBtn.classList.remove('hidden');
+        modalDownloadBtn.classList.add('inline-flex');
+      } else {
+        modalDownloadBtn.classList.add('hidden');
+        modalDownloadBtn.classList.remove('inline-flex');
+      }
+
+      previewModalGrid.innerHTML = `
+        <div class="col-span-full py-12 text-center text-xs text-slate-500">
+          Rendering page previews...
+        </div>
+      `;
+      previewModal.classList.remove('hidden');
+
+      try {
+        const bytesCopy = rawBytes instanceof Uint8Array ? rawBytes.slice() : new Uint8Array(rawBytes).slice();
+
+        if (window.pdfjsLib) {
+          const pdfDoc = await window.pdfjsLib.getDocument({ data: bytesCopy }).promise;
+          const total = pdfDoc.numPages;
+          previewModalGrid.innerHTML = '';
+          previewModalStatus.textContent = `Showing all ${total} page(s) in attachment sequence`;
+
+          for (let pageNum = 1; pageNum <= total; pageNum++) {
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-xl p-2.5 border border-slate-200 shadow-xs flex flex-col items-center';
+            const canvas = document.createElement('canvas');
+            canvas.className = 'w-full h-auto rounded border border-slate-100 bg-slate-50 mb-2';
+            const label = document.createElement('span');
+            label.className = 'text-xs font-semibold text-slate-700';
+            label.textContent = `Page ${pageNum}`;
+            card.appendChild(canvas);
+            card.appendChild(label);
+            previewModalGrid.appendChild(card);
+
+            const page = await pdfDoc.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 0.45 });
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+          }
+        } else {
+          const doc = await window.PDFLib.PDFDocument.load(bytesCopy, { ignoreEncryption: true });
+          const pages = doc.getPages();
+          previewModalGrid.innerHTML = pages.map((p, idx) => {
+            const { width, height } = p.getSize();
+            return `
+              <div class="bg-white rounded-xl p-4 border border-slate-200 flex flex-col items-center justify-center aspect-[1/1.35]">
+                <span class="text-sm font-bold text-slate-800">Page ${idx + 1}</span>
+                <span class="text-[11px] text-slate-400 mt-1">${Math.round(width)} × ${Math.round(height)} pt</span>
+              </div>
+            `;
+          }).join('');
+        }
+      } catch (e) {
+        previewModalGrid.innerHTML = `
+          <div class="col-span-full py-8 text-center text-xs text-rose-600">
+            Unable to render visual preview for this document.
+          </div>
+        `;
+      }
+    }
+
+    // Generate 3 realistic sample PDFs in-browser so user can test immediately
+    async function generateDemoPdfs() {
+      loadDemoBtn.disabled = true;
+      try {
+        const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+        const demos = [
+          {
+            filename: '01_Cover_Overview.pdf',
+            pages: 2,
+            accent: [0.31, 0.27, 0.9],
+            heading: 'Document 1: Executive Cover Overview',
+            body: 'Uploaded 1st - This PDF will appear at the very beginning of the combined file.'
+          },
+          {
+            filename: '02_Technical_Schedule.pdf',
+            pages: 2,
+            accent: [0.02, 0.58, 0.41],
+            heading: 'Document 2: Technical Milestone Schedule',
+            body: 'Uploaded 2nd - Attached immediately following Document 1.'
+          },
+          {
+            filename: '03_Signed_Appendix.pdf',
+            pages: 1,
+            accent: [0.85, 0.35, 0.12],
+            heading: 'Document 3: Signed Authorization Appendix',
+            body: 'Uploaded 3rd - Attached at the end of the merged document.'
+          }
+        ];
+
+        const syntheticFiles = [];
+        for (const demo of demos) {
+          const doc = await PDFDocument.create();
+          const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+          const reg = await doc.embedFont(StandardFonts.Helvetica);
+
+          for (let p = 1; p <= demo.pages; p++) {
+            const page = doc.addPage([595.28, 841.89]);
+            const { width, height } = page.getSize();
+            page.drawRectangle({
+              x: 0,
+              y: height - 95,
+              width,
+              height: 95,
+              color: rgb(demo.accent[0], demo.accent[1], demo.accent[2])
+            });
+            page.drawText(demo.filename, {
+              x: 45,
+              y: height - 48,
+              size: 18,
+              font: bold,
+              color: rgb(1, 1, 1)
+            });
+            page.drawText(`Source Page ${p} of ${demo.pages}`, {
+              x: 45,
+              y: height - 72,
+              size: 11,
+              font: reg,
+              color: rgb(0.92, 0.94, 1)
+            });
+            page.drawText(demo.heading, {
+              x: 45,
+              y: height - 150,
+              size: 16,
+              font: bold,
+              color: rgb(0.1, 0.12, 0.18)
+            });
+            page.drawText(demo.body, {
+              x: 45,
+              y: height - 180,
+              size: 11,
+              font: reg,
+              color: rgb(0.35, 0.4, 0.48)
+            });
+            page.drawRectangle({
+              x: 45,
+              y: 120,
+              width: width - 90,
+              height: height - 340,
+              borderColor: rgb(0.85, 0.88, 0.92),
+              borderWidth: 1,
+              color: rgb(0.98, 0.99, 1)
+            });
+            page.drawText(`Sample Content Block - ${demo.filename} (Page ${p})`, {
+              x: 70,
+              y: height - 240,
+              size: 12,
+              font: bold,
+              color: rgb(0.25, 0.3, 0.4)
+            });
+          }
+
+          const bytes = await doc.save();
+          const fileObj = new File([bytes], demo.filename, { type: 'application/pdf' });
+          syntheticFiles.push(fileObj);
+        }
+
+        await handleIncomingFiles(syntheticFiles);
+      } finally {
+        loadDemoBtn.disabled = false;
+      }
+    }
+
+    // Event Listeners
+    dropZone.addEventListener('click', () => pdfFileInput.click());
+    headerAddFilesBtn.addEventListener('click', () => pdfFileInput.click());
+    loadDemoBtn.addEventListener('click', generateDemoPdfs);
+
+    pdfFileInput.addEventListener('change', async (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        await handleIncomingFiles(e.target.files);
+        pdfFileInput.value = '';
+      }
+    });
+
+    // Drag & Drop on Upload Box
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drop-active');
+    });
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('drop-active');
+    });
+    dropZone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drop-active');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        await handleIncomingFiles(e.dataTransfer.files);
+      }
+    });
+
+    // Queue List Delegated Actions
+    queueList.addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const id = btn.dataset.id;
+      const idx = state.files.findIndex(f => f.id === id);
+      if (idx === -1) return;
+
+      if (action === 'remove') {
+        const removed = state.files.splice(idx, 1)[0];
+        invalidateMergedOutput();
+        renderAll();
+        showToast(`Removed "${removed.name}"`, 'info');
+      } else if (action === 'up' && idx > 0 && !state.lockUploadOrder) {
+        const temp = state.files[idx - 1];
+        state.files[idx - 1] = state.files[idx];
+        state.files[idx] = temp;
+        invalidateMergedOutput();
+        renderAll();
+      } else if (action === 'down' && idx < state.files.length - 1 && !state.lockUploadOrder) {
+        const temp = state.files[idx + 1];
+        state.files[idx + 1] = state.files[idx];
+        state.files[idx] = temp;
+        invalidateMergedOutput();
+        renderAll();
+      } else if (action === 'preview') {
+        const item = state.files[idx];
+        await openPageInspector(
+          `${item.name} (Upload #${item.uploadIndex})`,
+          `${item.pageCount} page(s) • ${formatBytes(item.size)}`,
+          item.rawBytes,
+          false
+        );
+      }
+    });
+
+    // Page range input updates
+    queueList.addEventListener('change', (e) => {
+      const input = e.target.closest('input[data-action="range"]');
+      if (!input) return;
+      const item = state.files.find(f => f.id === input.dataset.id);
+      if (!item) return;
+      item.rangeStr = input.value;
+      item.selectedIndices = parsePageRange(input.value, item.pageCount);
+      invalidateMergedOutput();
+      renderAll();
+    });
+
+    // Toolbar buttons
+    restoreUploadOrderBtn.addEventListener('click', () => {
+      state.files.sort((a, b) => a.uploadIndex - b.uploadIndex);
+      invalidateMergedOutput();
+      renderAll();
+      showToast('Restored exact chronological upload order', 'success');
+    });
+
+    reverseOrderBtn.addEventListener('click', () => {
+      if (state.lockUploadOrder) return;
+      state.files.reverse();
+      invalidateMergedOutput();
+      renderAll();
+      showToast('Reversed queue order', 'info');
+    });
+
+    clearQueueBtn.addEventListener('click', () => {
+      state.files = [];
+      state.nextUploadCounter = 1;
+      invalidateMergedOutput();
+      renderAll();
+      showToast('Cleared all uploaded PDFs', 'info');
+    });
+
+    // Settings toggles
+    lockUploadOrderToggle.addEventListener('change', () => {
+      state.lockUploadOrder = lockUploadOrderToggle.checked;
+      if (state.lockUploadOrder) {
+        state.files.sort((a, b) => a.uploadIndex - b.uploadIndex);
+      }
+      invalidateMergedOutput();
+      renderAll();
+    });
+
+    stampPageNumbersToggle.addEventListener('change', () => {
+      invalidateMergedOutput();
+      renderAll();
+    });
+
+    insertDividerPageToggle.addEventListener('change', () => {
+      invalidateMergedOutput();
+      renderAll();
+    });
+
+    outputFilenameInput.addEventListener('input', () => {
+      if (state.mergedPdfBytes) {
+        const finalFilename = getNormalizedFilename();
+        downloadMergedLink.download = finalFilename;
+        const totalPages = summaryPagesCount.textContent;
+        mergedResultMeta.textContent = `${totalPages} total pages • ${formatBytes(state.mergedPdfBytes.byteLength)} • ${finalFilename}`;
+      }
+    });
+
+    // Merge, Download, Print & Preview buttons
+    mergePdfsBtn.addEventListener('click', attachAllPdfs);
+    printSavePdfBtn.addEventListener('click', triggerPrintSaveAsPdf);
+    modalDownloadBtn.addEventListener('click', () => triggerProgrammaticDownload(false));
+    saveAsDialogBtn.addEventListener('click', handleSaveAsOrAltDownload);
+
+    inspectMergedBtn.addEventListener('click', async () => {
+      if (!state.mergedPdfBytes) return;
+      await openPageInspector(
+        'Combined PDF Output Preview',
+        'Pages attached in exact sequence',
+        state.mergedPdfBytes,
+        true
+      );
+    });
+
+    closePreviewModalBtn.addEventListener('click', () => previewModal.classList.add('hidden'));
+    closePreviewFooterBtn.addEventListener('click', () => previewModal.classList.add('hidden'));
+    previewModal.addEventListener('click', (e) => {
+      if (e.target === previewModal) previewModal.classList.add('hidden');
+    });
+
+    // Initial render
+    renderAll();
+  </script>
+</body>
+</html>
